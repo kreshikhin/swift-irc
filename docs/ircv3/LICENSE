@@ -1,0 +1,24 @@
+IRCv3 specifications
+
+Source: https://github.com/ircv3/ircv3-specifications
+Published form: https://ircv3.net/irc/
+
+The copyright holders of each specification are listed in that file's
+YAML front matter (`copyrights`).
+
+The specifications as published on ircv3.net include this permission
+notice, together with those copyright lines:
+
+    Unlimited redistribution and modification of this document is
+    allowed provided that the above copyright notice and this
+    permission notice remains intact.
+
+This notice has been part of the published specification template since
+April 2015:
+
+    https://github.com/ircv3/ircv3.github.io/pull/1
+
+The upstream repository does not ship a LICENSE file. Adopting one
+named license for the whole repository is still an open question:
+
+    https://github.com/ircv3/ircv3-specifications/issues/426
