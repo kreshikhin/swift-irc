@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.xcodeproj
+*.xcworkspace
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# SwiftPM writes user and workspace state here. Keep shared config, if any.
+.swiftpm/config/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.swiftpm/xcode/xcuserdata/
+
+# Credentials used by some package registries
+.netrc
