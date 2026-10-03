@@ -804,3 +804,67 @@ public enum IRCModeParser {
         }
     }
 }
+
+/// One IRC message. RFC 2812 section 2.3.1.
+///
+/// `tags` carries the IRCv3 message-tags prefix. An empty tag list is omitted on the wire.
+public struct IRCMessage: Equatable {
+    public var tags: IRCTags
+    public var prefix: IRCPrefix?
+    public var command: String
+    public var parameters: [String]
+
+    public init(
+        prefix: IRCPrefix? = nil,
+        command: String,
+        parameters: [String] = [],
+        tags: IRCTags = IRCTags()
+    ) throws {
+        self.tags = tags
+        self.prefix = prefix
+        self.command = try IRCCommand.canonicalName(command)
+        guard parameters.count <= IRC.maximumParameterCount else {
+            throw IRCError.tooManyParameters(parameters.count)
+        }
+        for parameter in parameters.dropLast() where parameter.contains(" ") || parameter.isEmpty || parameter.hasPrefix(":") {
+            throw IRCError.parameterContainsSpace(parameter)
+        }
+        self.parameters = parameters
+    }
+
+    public init(prefix: IRCPrefix? = nil, command: IRCCommand, tags: IRCTags = IRCTags()) throws {
+        try self.init(prefix: prefix, command: command.name, parameters: command.parameters, tags: tags)
+    }
+
+    public var numeric: IRCNumeric? {
+        guard command.count == 3, command.allSatisfy({ $0.isNumber }) else {
+            return nil
+        }
+        return IRCNumeric(code: Int(command) ?? 0)
+    }
+
+    /// Parses one line. `nil` means the line was empty and must be ignored.
+    /// The line may include a trailing CR-LF.
+    public static func parse(line: String) throws -> IRCMessage? {
+        try IRCParser.parse(line: line)
+    }
+
+    public static func parse(octets: [UInt8]) throws -> IRCMessage? {
+        try IRCParser.parse(octets: octets)
+    }
+
+    public func serialized() throws -> [UInt8] {
+        try IRCEncoder.encode(self)
+    }
+
+    public func serializedString() throws -> String {
+        try IRCEncoder.encodeString(self)
+    }
+
+    init(validatedPrefix prefix: IRCPrefix?, command: String, parameters: [String], tags: IRCTags) {
+        self.prefix = prefix
+        self.command = command
+        self.parameters = parameters
+        self.tags = tags
+    }
+}
