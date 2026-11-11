@@ -1,5 +1,9 @@
 # SwiftIRC
 
+[![Swift Versions](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fkreshikhin%2Fswift-irc%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/kreshikhin/swift-irc)
+[![Platforms](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fkreshikhin%2Fswift-irc%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/kreshikhin/swift-irc)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Swift package for the IRC client protocol. It parses and serializes messages, connects as a client, and runs a single local server.
 
 The library targets Swift 5.3. The client and server use BSD sockets and [Network](https://developer.apple.com/documentation/network), so they build on Apple platforms.
