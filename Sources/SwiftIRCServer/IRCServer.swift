@@ -11,6 +11,7 @@ public final class IRCServer {
 
     private let lock = NSLock()
     private var listenFD: Int32 = -1
+    private let reactor = IRCServerReactor()
     private var users: [String: IRCUser] = [:]
     private var sessions: [String: IRCServerSession] = [:]
     private var channels: [String: IRCChannel] = [:]
@@ -74,6 +75,13 @@ public final class IRCServer {
         }
         port = UInt16(bigEndian: boundAddress.sin_port)
         listenFD = descriptor
+        do {
+            try reactor.start()
+        } catch {
+            listenFD = -1
+            Darwin.close(descriptor)
+            throw error
+        }
         Thread.detachNewThread { [weak self] in
             self?.acceptLoop(descriptor)
         }
@@ -83,7 +91,6 @@ public final class IRCServer {
         lock.lock()
         let descriptor = listenFD
         listenFD = -1
-        let openSessions = allSessions
         allSessions = []
         users = [:]
         sessions = [:]
@@ -92,9 +99,7 @@ public final class IRCServer {
         if descriptor >= 0 {
             Darwin.close(descriptor)
         }
-        for session in openSessions {
-            session.close()
-        }
+        reactor.stop()
     }
 
     func receive(_ message: IRCMessage, from session: IRCServerSession) {
@@ -124,7 +129,11 @@ public final class IRCServer {
                 host: peerHost(client),
                 serverName: name
             )
-            let session = IRCServerSession(fileDescriptor: client, user: user, server: self)
+            var noSignal: Int32 = 1
+            setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+            let flags = fcntl(client, F_GETFL, 0)
+            _ = fcntl(client, F_SETFL, flags | O_NONBLOCK)
+            let session = IRCServerSession(fileDescriptor: client, user: user, server: self, reactor: reactor)
             lock.lock()
             let stillListening = listenFD >= 0
             if stillListening {
@@ -132,7 +141,7 @@ public final class IRCServer {
             }
             lock.unlock()
             if stillListening {
-                session.start()
+                reactor.add(session)
             } else {
                 Darwin.close(client)
             }
