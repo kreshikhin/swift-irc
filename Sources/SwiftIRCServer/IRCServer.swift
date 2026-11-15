@@ -9,6 +9,8 @@ public final class IRCServer {
     public private(set) var port: UInt16
     public var password: String?
 
+    static let offeredCapabilities: Set<String> = ["message-tags"]
+
     private let lock = NSLock()
     private var listenFD: Int32 = -1
     private let reactor = IRCServerReactor()
@@ -162,6 +164,9 @@ public final class IRCServer {
         if user.didQuit {
             return Outcome()
         }
+        if message.command == "CAP" {
+            return negotiateCapabilities(message, user: user, session: session)
+        }
         let decoded = message.decode()
         if !user.isRegistered {
             switch decoded {
@@ -191,9 +196,9 @@ public final class IRCServer {
         case .part(let channelNames, let comment):
             return part(channelNames, comment: comment, user: user, session: session)
         case .privmsg(let target, let text):
-            return chat(target, text: text, command: "PRIVMSG", user: user, session: session, reportErrors: true)
+            return chat(target, text: text, command: "PRIVMSG", tags: relayTags(message, user: user), user: user, session: session, reportErrors: true)
         case .notice(let target, let text):
-            return chat(target, text: text, command: "NOTICE", user: user, session: session, reportErrors: false)
+            return chat(target, text: text, command: "NOTICE", tags: relayTags(message, user: user), user: user, session: session, reportErrors: false)
         case .topic(let channelName, let topic):
             return setTopic(channelName, topic: topic, user: user, session: session)
         case .names(let channelNames, _):
@@ -288,6 +293,9 @@ public final class IRCServer {
     }
 
     private func finishRegistration(user: IRCUser, session: IRCServerSession) -> Outcome {
+        if user.isNegotiatingCapabilities {
+            return Outcome()
+        }
         if let required = password, user.password != required {
             return reply(.passwordMismatch, to: user, trailing: "Password incorrect", session: session)
         }
@@ -398,6 +406,7 @@ public final class IRCServer {
         _ target: String,
         text: String,
         command: String,
+        tags: IRCTags,
         user: IRCUser,
         session: IRCServerSession,
         reportErrors: Bool
@@ -406,8 +415,14 @@ public final class IRCServer {
             guard reportErrors else { return Outcome() }
             return reply(.noTextToSend, to: user, trailing: "No text to send", session: session)
         }
-        guard let message = try? IRCMessage(prefix: user.prefix, command: command, parameters: [target, text]) else {
+        guard var message = try? IRCMessage(prefix: user.prefix, command: command, parameters: [target, text], tags: tags) else {
             return Outcome()
+        }
+        if (try? IRCEncoder.encode(message)) == nil {
+            message.tags = IRCTags()
+            if (try? IRCEncoder.encode(message)) == nil {
+                return Outcome()
+            }
         }
         if (try? IRCChannelName.validate(target)) != nil {
             guard let channel = channels[IRCCaseMapping.fold(target)] else {
@@ -433,7 +448,7 @@ public final class IRCServer {
             guard reportErrors else { return Outcome() }
             return reply(.noSuchNick, to: user, trailing: "No such nick/channel", middle: [target], session: session)
         }
-        var outcome = Outcome(deliveries: [Delivery(session: targetSession, message: message)])
+        var outcome = Outcome(deliveries: [Delivery(session: targetSession, message: messageForRecipient(message, session: targetSession))])
         if let away = targetSession.user.awayMessage, command == "PRIVMSG" {
             outcome.append(reply(.away, to: user, trailing: away, middle: [targetSession.user.nickname], session: session))
         }
@@ -758,7 +773,7 @@ public final class IRCServer {
             guard let session = sessions[folded] else {
                 continue
             }
-            deliveries.append(Delivery(session: session, message: message))
+            deliveries.append(Delivery(session: session, message: messageForRecipient(message, session: session)))
         }
         return Outcome(deliveries: deliveries)
     }
@@ -776,7 +791,7 @@ public final class IRCServer {
                 }
             }
         }
-        return Outcome(deliveries: seen.values.map { Delivery(session: $0, message: message) })
+        return Outcome(deliveries: seen.values.map { Delivery(session: $0, message: self.messageForRecipient(message, session: $0)) })
     }
 
     private var serverPrefix: IRCPrefix {
@@ -799,6 +814,104 @@ public final class IRCServer {
         return Outcome(deliveries: [Delivery(session: session, message: message)])
     }
 }
+
+
+    private func relayTags(_ message: IRCMessage, user: IRCUser) -> IRCTags {
+        if user.enabledCapabilities.contains("message-tags") {
+            return message.tags
+        }
+        return IRCTags()
+    }
+
+    private func messageForRecipient(_ message: IRCMessage, session: IRCServerSession) -> IRCMessage {
+        if message.tags.isEmpty || session.user.enabledCapabilities.contains("message-tags") {
+            return message
+        }
+        var stripped = message
+        stripped.tags = IRCTags()
+        return stripped
+    }
+
+    private func negotiateCapabilities(_ message: IRCMessage, user: IRCUser, session: IRCServerSession) -> Outcome {
+        let subcommand = message.parameters.first?.uppercased() ?? ""
+        switch subcommand {
+        case "LS":
+            let requested = message.parameters.count > 1 ? Int(message.parameters[1]) ?? 0 : 0
+            if requested > user.capVersion {
+                user.capVersion = requested
+            }
+            if !user.isRegistered {
+                user.isNegotiatingCapabilities = true
+            }
+            return capabilityReply(
+                "LS",
+                payload: IRCServer.offeredCapabilities.sorted().joined(separator: " "),
+                user: user,
+                session: session
+            )
+        case "LIST":
+            return capabilityReply(
+                "LIST",
+                payload: user.enabledCapabilities.sorted().joined(separator: " "),
+                user: user,
+                session: session
+            )
+        case "REQ":
+            if !user.isRegistered {
+                user.isNegotiatingCapabilities = true
+            }
+            let tokens = capabilityTokens(message.parameters)
+            if tokens.isEmpty {
+                return invalidCapabilityCommand(subcommand, user: user, session: session)
+            }
+            for token in tokens {
+                let name = token.hasPrefix("-") ? String(token.dropFirst()) : token
+                if name.isEmpty || !IRCServer.offeredCapabilities.contains(name) {
+                    return capabilityReply("NAK", payload: tokens.joined(separator: " "), user: user, session: session)
+                }
+            }
+            for token in tokens {
+                if token.hasPrefix("-") {
+                    user.enabledCapabilities.remove(String(token.dropFirst()))
+                } else {
+                    user.enabledCapabilities.insert(token)
+                }
+            }
+            return capabilityReply("ACK", payload: tokens.joined(separator: " "), user: user, session: session)
+        case "END":
+            if user.isRegistered {
+                return Outcome()
+            }
+            user.isNegotiatingCapabilities = false
+            if !user.nickname.isEmpty && !user.username.isEmpty {
+                return finishRegistration(user: user, session: session)
+            }
+            return Outcome()
+        default:
+            let name = subcommand.isEmpty ? "CAP" : subcommand
+            return invalidCapabilityCommand(name, user: user, session: session)
+        }
+    }
+
+    private func capabilityTokens(_ parameters: [String]) -> [String] {
+        parameters.dropFirst().joined(separator: " ").split(separator: " ").map(String.init).filter { !$0.isEmpty }
+    }
+
+    private func capabilityReply(_ subcommand: String, payload: String, user: IRCUser, session: IRCServerSession) -> Outcome {
+        let nick = user.nickname.isEmpty ? "*" : user.nickname
+        guard let reply = try? IRCMessage(prefix: serverPrefix, command: "CAP", parameters: [nick, subcommand, payload]) else {
+            return Outcome()
+        }
+        return Outcome(deliveries: [Delivery(session: session, message: reply)])
+    }
+
+    private func invalidCapabilityCommand(_ subcommand: String, user: IRCUser, session: IRCServerSession) -> Outcome {
+        let nick = user.nickname.isEmpty ? "*" : user.nickname
+        guard let reply = try? IRCMessage(prefix: serverPrefix, command: "410", parameters: [nick, subcommand, "Invalid CAP command"]) else {
+            return Outcome()
+        }
+        return Outcome(deliveries: [Delivery(session: session, message: reply)])
+    }
 
 private struct Delivery {
     var session: IRCServerSession

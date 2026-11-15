@@ -14,6 +14,9 @@ public final class IRCUser {
     public var isOperator: Bool
     public var password: String?
     public internal(set) var didQuit: Bool
+    var isNegotiatingCapabilities: Bool
+    var capVersion: Int
+    var enabledCapabilities: Set<String>
 
     public init(
         nickname: String,
@@ -33,6 +36,9 @@ public final class IRCUser {
         isOperator = false
         password = nil
         didQuit = false
+        isNegotiatingCapabilities = false
+        capVersion = 0
+        enabledCapabilities = []
     }
 
     public var isInvisible: Bool {
