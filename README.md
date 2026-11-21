@@ -2,14 +2,14 @@
 
 [![Swift 5.3](https://img.shields.io/badge/Swift-5.3+-F05138?logo=swift&logoColor=white)](https://swift.org)
 [![Swift Package Manager](https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?logo=swift&logoColor=white)](https://swift.org/package-manager/)
-[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20iOS%20%7C%20tvOS%20%7C%20watchOS%20%7C%20visionOS-lightgrey)](https://swift.org)
+[![Platforms](https://img.shields.io/badge/platform-macOS-lightgrey)](https://swift.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Swift package for the IRC client protocol. It parses and serializes messages, connects as a client, and runs a single local server.
+IRC client and server library for Swift.
 
-The library targets Swift 5.3. The client and server use BSD sockets and [Network](https://developer.apple.com/documentation/network), so they build on Apple platforms.
+Includes a message parser, encoder, typed IRC commands, TCP/TLS client, and a basic IRC server.
 
-## Package
+## Installation
 
 ```swift
 // swift-tools-version:5.3
@@ -18,7 +18,7 @@ import PackageDescription
 let package = Package(
     name: "Example",
     dependencies: [
-        .package(url: "https://github.com/kreshikhin/swift-irc.git", .branch("main"))
+        .package(url: "https://github.com/kreshikhin/swift-irc.git", from: "0.1.0")
     ],
     targets: [
         .target(
@@ -31,19 +31,19 @@ let package = Package(
 )
 ```
 
-Three products share no extra dependencies:
+## Modules
 
 | Product | Role |
 |---|---|
-| `SwiftIRCCore` | Messages, commands, parser, encoder, IRCv3 tags |
-| `SwiftIRCClient` | TCP and TLS connection, registration, send and receive |
-| `SwiftIRCServer` | One local server: users, channels, and the client commands it implements |
+| `SwiftIRCCore` | Parsing, serialization, and typed commands |
+| `SwiftIRCClient` | TCP and TLS client |
+| `SwiftIRCServer` | Single-process IRC server |
 
-`SwiftIRCClient` and `SwiftIRCServer` depend on `SwiftIRCCore`.
+## Usage
 
-## Messages
+### Messages
 
-`SwiftIRCCore` reads a line into `IRCMessage` and writes it back with the trailing CR-LF. The command is stored in uppercase. A trailing parameter is prefixed with `:` only when it is empty, contains a space, or starts with `:`.
+`SwiftIRCCore` provides IRC message parsing, serialization, and typed commands.
 
 ```swift
 import SwiftIRCCore
@@ -55,13 +55,11 @@ let command = try IRCCommand.privmsg(target: "#swift", text: "hello")
 let line = try IRCMessage(command: command).serializedString()
 ```
 
-`IRCCommand` builds the client commands from RFC 1459 and RFC 2812, plus the server forms whose shape differs in RFC 2813 (`SERVER`, `NJOIN`, server `PASS` and `NICK`). `IRCMessage.decode()` turns a message back into `IRCDecodedCommand`. Nicknames, channels, keys, and RFC 1459 casemapping are checked before a command is built.
+`IRCCommand` provides typed commands based on [RFC 1459](https://www.rfc-editor.org/rfc/rfc1459), [RFC 2812](https://www.rfc-editor.org/rfc/rfc2812), and [RFC 2813](https://www.rfc-editor.org/rfc/rfc2813).
 
-IRCv3 tags sit on `IRCMessage.tags`. An empty tag list is left off the wire. Values escape space, `;`, `\`, CR, and LF.
+### Client
 
-## Client
-
-The default cleartext port is 6667. `useTLS: true` uses port 6697.
+Cleartext uses port 6667. `useTLS: true` uses port 6697. Replace `irc.example.net` with your server.
 
 ```swift
 import SwiftIRCClient
@@ -86,13 +84,7 @@ while let message = try client.receive() {
 }
 ```
 
-`PASS`, when present, is sent before `NICK` and `USER`. A `PASS` after `NICK`, `USER`, or `SERVICE` throws `IRCError.passwordSentTooLate`. During registration a `PING` is answered with `PONG`. Registration finishes at `RPL_WELCOME` (001). An `ERROR` or any 4xx numeric fails it.
-
-`IRCClient.connection` is the socket. `IRCClient.session` keeps the nickname and registration state.
-
-## Server
-
-`IRCServer` listens on one host, accepts clients, and answers the registration and channel commands it implements. `port: 0` asks the system for a free port. `server.port` is that port after `start()`.
+### Server
 
 ```swift
 import SwiftIRCServer
@@ -102,43 +94,26 @@ try server.start()
 defer { server.stop() }
 ```
 
-A registered client can `JOIN`, `PART`, `PRIVMSG`, `NOTICE`, `TOPIC`, `NAMES`, `MODE`, `WHOIS`, `USERHOST`, `ISON`, `AWAY`, and the registration and query commands the server handles. Anything else gets `ERR_UNKNOWNCOMMAND`. This is one server process, not a server-to-server network.
-
-## Layout
-
-```
-Sources/
-├── SwiftIRCCore/
-│   ├── IRCMessage.swift
-│   ├── IRCCommand.swift
-│   ├── IRCParser.swift
-│   ├── IRCEncoder.swift
-│   └── IRCTags.swift
-├── SwiftIRCClient/
-│   ├── IRCClient.swift
-│   ├── IRCConnection.swift
-│   └── IRCClientSession.swift
-└── SwiftIRCServer/
-    ├── IRCServer.swift
-    ├── IRCServerSession.swift
-    ├── IRCChannel.swift
-    └── IRCUser.swift
-```
+`IRCServer` is one process and does not link to other servers. `port: 0` selects a free port, available as `server.port` after `start()`.
 
 ## Specifications
 
-The codec follows the client protocol in RFC 1459 and RFC 2812, channel modes in RFC 2811, and the TLS port in RFC 7194. Numeric 005 is `RPL_BOUNCE`, as assigned by RFC 2812.
+Client messages follow [RFC 1459](https://www.rfc-editor.org/rfc/rfc1459) and [RFC 2812](https://www.rfc-editor.org/rfc/rfc2812). Channel modes follow [RFC 2811](https://www.rfc-editor.org/rfc/rfc2811). The TLS port follows [RFC 7194](https://www.rfc-editor.org/rfc/rfc7194).
 
-Copies of the source documents live under `docs/`:
+Copies of the source documents are in `docs/`:
 
-- `docs/rfc` — RFC 1459, 2810, 2811, 2812, 2813, and 7194
-- `docs/ircv3` — IRCv3 specifications
-- `docs/irc-client-protocol` — Modern IRC client protocol
+- [`docs/rfc`](docs/rfc) — [RFC 1459](https://www.rfc-editor.org/rfc/rfc1459), [2810](https://www.rfc-editor.org/rfc/rfc2810), [2811](https://www.rfc-editor.org/rfc/rfc2811), [2812](https://www.rfc-editor.org/rfc/rfc2812), [2813](https://www.rfc-editor.org/rfc/rfc2813), and [7194](https://www.rfc-editor.org/rfc/rfc7194)
+- [`docs/ircv3`](docs/ircv3) — [IRCv3](https://ircv3.net/irc/)
+- [`docs/irc-client-protocol`](docs/irc-client-protocol) — [Modern IRC client protocol](https://modern.ircdocs.horse/)
 
-Those copies keep the license that came with each document. See `docs/rfc/LICENSE`, `docs/ircv3/LICENSE`, and `docs/irc-client-protocol/LICENSE`. The root `LICENSE` is MIT and covers this package, not those documents.
-
-## Tests
+## Testing
 
 ```sh
 swift test
 ```
+
+## License
+
+This package is [MIT](LICENSE).
+
+The documents under `docs/` keep their own licenses: [`docs/rfc/LICENSE`](docs/rfc/LICENSE), [`docs/ircv3/LICENSE`](docs/ircv3/LICENSE), and [`docs/irc-client-protocol/LICENSE`](docs/irc-client-protocol/LICENSE).
